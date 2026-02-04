@@ -86,13 +86,13 @@
             CONTROL:  {"木": "土", "土": "水", "水": "火", "火": "金", "金": "木"},
             isPairInSet: (a, b, setArray) => {
                 const pair = [a, b].sort().join(',');
-                return setArray.some(p => [...p].sort().join(',') === pair);
+                 setArray.some(p => [...p].sort().join(',') === pair);
             },
             KAN_GO: [["甲", "己"], ["乙", "庚"], ["丙", "辛"], ["丁", "壬"], ["戊", "癸"]],
             SAN_GO: [["申", "子", "辰"], ["寅", "午", "戌"], ["亥", "卯", "未"], ["巳", "酉", "丑"]],
             isSanGo: (b1, b2) => {
                 const pair = [b1, b2];
-                return LOGIC.SAN_GO.some(triple => pair.every(val => triple.includes(val)));
+                 LOGIC.SAN_GO.some(triple => pair.every(val => triple.includes(val)));
             },
             ROKU_CHU: [["子", "午"], ["丑", "未"], ["寅", "申"], ["卯", "酉"], ["辰", "戌"], ["巳", "亥"]],
             SHI_GO: [["子", "丑"], ["寅", "亥"], ["卯", "戌"], ["辰", "酉"], ["巳", "申"], ["午", "未"]],
@@ -140,7 +140,7 @@
                 
                 const month_stem_idx = (tora_stem_idx + diff_from_tora) % 10;
                 
-                return {
+                 {
                 day: [LOGIC.STEMS[Math.abs(day_idx % 10)], LOGIC.BRANCHES[Math.abs(day_idx % 12)]],
                 month: [LOGIC.STEMS[month_stem_idx], LOGIC.BRANCHES[month_branch_idx]],
                 year: [LOGIC.STEMS[year_idx % 10], LOGIC.BRANCHES[year_idx % 12]],
@@ -151,7 +151,7 @@
             getStemScore: (s1, s2) => {
                 const e1 = LOGIC.ELEMENTS[s1];
                 const e2 = LOGIC.ELEMENTS[s2];
-                if (LOGIC.isPairInSet(s1, s2, LOGIC.KAN_GO)) return 3.0;
+                if (LOGIC.isPairInSet(s1, s2, LOGIC.KAN_GO)) return 3.5;
                 let score = 0.0;
                 if (LOGIC.GENERATE[e1] === e2 || LOGIC.GENERATE[e2] === e1) score += 1.5;
                 else if (LOGIC.CONTROL[e1] === e2 || LOGIC.CONTROL[e2] === e1) score -= 1.0;
@@ -164,7 +164,7 @@
             },
             
             getBranchScore: (b1, b2) => {
-                if (LOGIC.isSanGo(b1, b2)) return 2.5;
+                if (LOGIC.isSanGo(b1, b2)) return 3.0;
                 if (LOGIC.isPairInSet(b1, b2, LOGIC.SHI_GO)) return 2.0;
                 if (LOGIC.isPairInSet(b1, b2, LOGIC.ROKU_CHU)) return -3.0;
                 if (b1 === b2) return 0.5;
@@ -189,11 +189,11 @@
                 const type2 = LOGIC.STEM_NAMES[k2.day[0]];
                 
                 const score_basic = Engine.getStemScore(k1.day[0], k2.day[0]);
-                const p_basic = Engine.calculatePercent(score_basic, 0.5, 1.2);
+                const p_basic = Engine.calculatePercent(score_basic, 0.5, 1.65);
                 
                 const score_branch = Engine.getBranchScore(k1.day[1], k2.day[1]);
                 const score_love = score_branch * 1.5 + score_basic * 0.5;
-                const p_love = Engine.calculatePercent(score_love, 0.5, 2.0);
+                const p_love = Engine.calculatePercent(score_love, 0.5, 1.5);
                 
                 const me_elem = LOGIC.ELEMENTS[k1.day[0]];
                 const you_env_elem = LOGIC.BRANCH_ELEMENTS[k2.month[1]];
@@ -213,9 +213,9 @@
                     score_work = 0.5; work_role = "【表現運】あなたの才能を相手のために発揮する";
                 }
                 
-                const p_work = Engine.calculatePercent(score_work, 0.5, 1.0);
+                const p_work = Engine.calculatePercent(score_work, 0.5, 0.65);
                 
-                return {
+                 {
                     me: { date: date1Str, type: type1, k: k1 },
                     you: { date: date2Str, type: type2, k: k2 },
                     results: [
@@ -227,7 +227,7 @@
                 
                 } catch (e) {
                 console.error(e);
-                return null;
+                 null;
                 }
             }
         };
@@ -274,7 +274,7 @@
                 </button>
             );
 
-            return (
+             (
                 <div className="min-h-screen bg-slate-50 font-sans text-gray-800 pb-20">
                 <header className="bg-gradient-to-r from-indigo-900 to-purple-800 text-white pt-16 pb-24 px-6 relative overflow-hidden">
                     <div className="absolute top-0 left-0 w-full h-full opacity-10 pointer-events-none">
@@ -534,7 +534,7 @@
                                     const rank = res.p >= 90 ? "S" : res.p >= 70 ? "A" : res.p >= 50 ? "B" : res.p >= 30 ? "C" : "D";
                                     const rankColor = res.p >= 90 ? "text-yellow-500" : res.p >= 70 ? "text-red-500" : res.p >= 50 ? "text-green-500" : "text-gray-500";
                                     const barWidth = `${Math.min(res.p, 100)}%`;
-                                    return (
+                                     (
                                     <div key={idx} className="bg-white rounded-xl shadow p-6 border border-gray-100">
                                         <div className="flex justify-between items-end mb-2">
                                         <h3 className="font-bold text-lg text-gray-800">{res.label}</h3>
