@@ -34,7 +34,7 @@
         const { useState, useEffect } = React;
 
         // ==========================================
-        // 0. Icon Components (SVG Embeds for Standalone)
+        // 0. Icon Components
         // ==========================================
         const IconBase = ({ children, className, color = "currentColor", size = 24, ...props }) => (
             <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className} {...props}>
@@ -84,18 +84,20 @@
             },
             GENERATE: {"木": "火", "火": "土", "土": "金", "金": "水", "水": "木"},
             CONTROL:  {"木": "土", "土": "水", "水": "火", "火": "金", "金": "木"},
-            isPairInSet: (a, b, setArray) => {
-                const pair = [a, b].sort().join(',');
-                 setArray.some(p => [...p].sort().join(',') === pair);
-            },
+            
             KAN_GO: [["甲", "己"], ["乙", "庚"], ["丙", "辛"], ["丁", "壬"], ["戊", "癸"]],
             SAN_GO: [["申", "子", "辰"], ["寅", "午", "戌"], ["亥", "卯", "未"], ["巳", "酉", "丑"]],
-            isSanGo: (b1, b2) => {
-                const pair = [b1, b2];
-                 LOGIC.SAN_GO.some(triple => pair.every(val => triple.includes(val)));
-            },
             ROKU_CHU: [["子", "午"], ["丑", "未"], ["寅", "申"], ["卯", "酉"], ["辰", "戌"], ["巳", "亥"]],
             SHI_GO: [["子", "丑"], ["寅", "亥"], ["卯", "戌"], ["辰", "酉"], ["巳", "申"], ["午", "未"]],
+            
+            isPairInSet: (a, b, setArray) => {
+                const pair = [a, b].sort().join(',');
+                return setArray.some(p => [...p].sort().join(',') === pair);
+            },
+            isSanGo: (b1, b2) => {
+                const pair = [b1, b2];
+                return LOGIC.SAN_GO.some(triple => pair.every(val => triple.includes(val)));
+            },
             SETSU_IRI_DAYS: {1: 6, 2: 4, 3: 6, 4: 5, 5: 6, 6: 6, 7: 7, 8: 8, 9: 8, 10: 8, 11: 7, 12: 7}
         };
 
@@ -103,8 +105,9 @@
         // 2. 暦計算エンジン (Engine)
         // ==========================================
         const Engine = {
+            // 干支計算ロジック（節入り日考慮）
             getKanshi: (d) => {
-                const base = new Date(1900, 1, 20);
+                const base = new Date(1900, 1, 20); 
                 const diffTime = Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()) - Date.UTC(base.getFullYear(), base.getMonth(), base.getDate());
                 const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24));
                 const day_idx = diffDays % 60; 
@@ -140,7 +143,7 @@
                 
                 const month_stem_idx = (tora_stem_idx + diff_from_tora) % 10;
                 
-                 {
+                return {
                 day: [LOGIC.STEMS[Math.abs(day_idx % 10)], LOGIC.BRANCHES[Math.abs(day_idx % 12)]],
                 month: [LOGIC.STEMS[month_stem_idx], LOGIC.BRANCHES[month_branch_idx]],
                 year: [LOGIC.STEMS[year_idx % 10], LOGIC.BRANCHES[year_idx % 12]],
@@ -148,92 +151,122 @@
                 };
             },
 
-            getStemScore: (s1, s2) => {
-                const e1 = LOGIC.ELEMENTS[s1];
-                const e2 = LOGIC.ELEMENTS[s2];
-                if (LOGIC.isPairInSet(s1, s2, LOGIC.KAN_GO)) return 3.5;
-                let score = 0.0;
-                if (LOGIC.GENERATE[e1] === e2 || LOGIC.GENERATE[e2] === e1) score += 1.5;
-                else if (LOGIC.CONTROL[e1] === e2 || LOGIC.CONTROL[e2] === e1) score -= 1.0;
-                else if (e1 === e2) score += 1.0;
-                const idx1 = LOGIC.STEMS.indexOf(s1);
-                const idx2 = LOGIC.STEMS.indexOf(s2);
-                if ((idx1 % 2) !== (idx2 % 2)) score += 1.0;
-                else score -= 0.5;
-                return score;
-            },
-            
-            getBranchScore: (b1, b2) => {
-                if (LOGIC.isSanGo(b1, b2)) return 3.0;
-                if (LOGIC.isPairInSet(b1, b2, LOGIC.SHI_GO)) return 2.0;
-                if (LOGIC.isPairInSet(b1, b2, LOGIC.ROKU_CHU)) return -3.0;
-                if (b1 === b2) return 0.5;
-                return 0.0;
-            },
-            
-            calculatePercent: (raw_score, mean=0.0, std=1.5) => {
+            // 確率計算（軸ごとにパラメータを変更可能にする）
+            calculatePercent: (raw_score, mean=0.5, std=1.5) => {
                 const z = (raw_score - mean) / std;
                 const p = 100 / (1 + Math.exp(-z));
                 return p;
             },
+
+            // ランク判定（5段階）
+            getRank: (p) => {
+                if (p >= 90) return "S";
+                if (p >= 70) return "A";
+                if (p >= 50) return "B";
+                if (p >= 30) return "C";
+                return "D";
+            },
+
+            // [軸1] 人間関係
+            getStemScore: (s1, s2) => {
+                // 特異点: 干合なら即座に高得点
+                if (LOGIC.isPairInSet(s1, s2, LOGIC.KAN_GO)) return 3.5;
+                
+                const e1 = LOGIC.ELEMENTS[s1];
+                const e2 = LOGIC.ELEMENTS[s2];
+                let score = 0.0;
+                
+                // 五行相生・相剋・比和
+                if (LOGIC.GENERATE[e1] === e2 || LOGIC.GENERATE[e2] === e1) score += 1.5;
+                else if (LOGIC.CONTROL[e1] === e2 || LOGIC.CONTROL[e2] === e1) score -= 1.0;
+                else if (e1 === e2) score += 1.0;
+                
+                // 陰陽
+                const idx1 = LOGIC.STEMS.indexOf(s1);
+                const idx2 = LOGIC.STEMS.indexOf(s2);
+                if ((idx1 % 2) !== (idx2 % 2)) score += 1.0;
+                else score -= 0.5;
+                
+                return score;
+            },
+            
+            // [軸2] 恋愛・結婚
+            getBranchScore: (b1, b2) => {
+                // 特異点: 三合
+                if (LOGIC.isSanGo(b1, b2)) return 3.0;
+                // 支合
+                if (LOGIC.isPairInSet(b1, b2, LOGIC.SHI_GO)) return 2.0;
+                // 六冲（致命的）
+                if (LOGIC.isPairInSet(b1, b2, LOGIC.ROKU_CHU)) return -3.0;
+                // 同一
+                if (b1 === b2) return 0.5;
+                
+                return 0.0;
+            },
             
             diagnose: (date1Str, date2Str) => {
                 try {
-                const d1 = new Date(date1Str);
-                const d2 = new Date(date2Str);
-                
-                const k1 = Engine.getKanshi(d1);
-                const k2 = Engine.getKanshi(d2);
-                
-                const type1 = LOGIC.STEM_NAMES[k1.day[0]];
-                const type2 = LOGIC.STEM_NAMES[k2.day[0]];
-                
-                const score_basic = Engine.getStemScore(k1.day[0], k2.day[0]);
-                const p_basic = Engine.calculatePercent(score_basic, 0.5, 1.65);
-                
-                const score_branch = Engine.getBranchScore(k1.day[1], k2.day[1]);
-                const score_love = score_branch * 1.5 + score_basic * 0.5;
-                const p_love = Engine.calculatePercent(score_love, 0.5, 1.5);
-                
-                const me_elem = LOGIC.ELEMENTS[k1.day[0]];
-                const you_env_elem = LOGIC.BRANCH_ELEMENTS[k2.month[1]];
-                
-                let score_work = 0.0;
-                let work_role = "";
-                
-                if (LOGIC.GENERATE[you_env_elem] === me_elem) {
-                    score_work = 2.0; work_role = "【引き立て運】相手の環境があなたを育ててくれる";
-                } else if (me_elem === you_env_elem) {
-                    score_work = 1.0; work_role = "【パートナー運】対等な立場で背中を預けられる";
-                } else if (LOGIC.CONTROL[me_elem] === you_env_elem) {
-                    score_work = 1.5; work_role = "【主導権運】あなたが相手を動かし利益を生む";
-                } else if (LOGIC.CONTROL[you_env_elem] === me_elem) {
-                    score_work = -1.0; work_role = "【修練運】相手のルールに管理・鍛えられる";
-                } else if (LOGIC.GENERATE[me_elem] === you_env_elem) {
-                    score_work = 0.5; work_role = "【表現運】あなたの才能を相手のために発揮する";
-                }
-                
-                const p_work = Engine.calculatePercent(score_work, 0.5, 0.65);
-                
-                 {
-                    me: { date: date1Str, type: type1, k: k1 },
-                    you: { date: date2Str, type: type2, k: k2 },
-                    results: [
-                    { label: "人間関係 (Friend)", p: p_basic, meaning: "魂の共鳴度", logic: "日干同士の相性" },
-                    { label: "恋愛結婚 (Love)",   p: p_love,  meaning: "生活の一致度", logic: "日支(配偶者座)の相性" },
-                    { label: "仕事関係 (Work)",   p: p_work,  meaning: "環境適応力",   logic: work_role }
-                    ]
-                };
-                
+                    const d1 = new Date(date1Str);
+                    const d2 = new Date(date2Str);
+                    
+                    const k1 = Engine.getKanshi(d1);
+                    const k2 = Engine.getKanshi(d2);
+                    
+                    // --- 軸1: 人間関係 ---
+                    const score_basic = Engine.getStemScore(k1.day[0], k2.day[0]);
+                    // Sモデル設定: std=1.9
+                    const p_basic = Engine.calculatePercent(score_basic, 0.5, 1.9);
+                    
+                    // --- 軸2: 恋愛・結婚 ---
+                    const score_branch = Engine.getBranchScore(k1.day[1], k2.day[1]);
+                    const score_love = score_branch * 1.5 + score_basic * 0.5;
+                    // Sモデル設定: std=1.8
+                    const p_love = Engine.calculatePercent(score_love, 0.5, 1.8);
+                    
+                    // --- 軸3: 仕事 ---
+                    const me_elem = LOGIC.ELEMENTS[k1.day[0]];
+                    const you_env_elem = LOGIC.BRANCH_ELEMENTS[k2.month[1]];
+                    
+                    let score_work = 0.0;
+                    let work_role = "";
+                    
+                    if (LOGIC.GENERATE[you_env_elem] === me_elem) {
+                        score_work = 2.0; work_role = "【引き立て運】相手の環境があなたを育ててくれる";
+                    } else if (me_elem === you_env_elem) {
+                        score_work = 1.0; work_role = "【協業運】対等な立場で背中を預けられる";
+                    } else if (LOGIC.CONTROL[me_elem] === you_env_elem) {
+                        score_work = 1.5; work_role = "【主導運】あなたが相手を動かし利益を生む";
+                    } else if (LOGIC.CONTROL[you_env_elem] === me_elem) {
+                        score_work = -1.0; work_role = "【修練運】相手のルールに管理・鍛えられる";
+                    } else if (LOGIC.GENERATE[me_elem] === you_env_elem) {
+                        score_work = 0.5; work_role = "【表現運】あなたの才能を相手のために発揮する";
+                    }
+                    
+                    // Sモデル設定: std=0.8 (シビア)
+                    const p_work = Engine.calculatePercent(score_work, 0.5, 0.8);
+                    
+                    // タイプ情報
+                    const type1 = LOGIC.STEM_NAMES[k1.day[0]];
+                    const type2 = LOGIC.STEM_NAMES[k2.day[0]];
+                    
+                    return {
+                        me: { date: date1Str, type: type1, k: k1 },
+                        you: { date: date2Str, type: type2, k: k2 },
+                        results: [
+                            { label: "人間関係 (Friend)", p: p_basic, rank: Engine.getRank(p_basic), meaning: "魂の共鳴度", logic: "日干同士の相性" },
+                            { label: "恋愛結婚 (Love)",   p: p_love,   rank: Engine.getRank(p_love),   meaning: "生活の一致度", logic: "日支(配偶者座)の相性" },
+                            { label: "仕事関係 (Work)",   p: p_work,   rank: Engine.getRank(p_work),   meaning: "環境適応力",   logic: work_role }
+                        ]
+                    };
                 } catch (e) {
-                console.error(e);
-                 null;
+                    console.error(e);
+                    return null;
                 }
             }
         };
 
         // ==========================================
-        // 3. React App Component
+        // 4. React UI Component
         // ==========================================
         const DestinyLogicDocs = () => {
             const [activeTab, setActiveTab] = useState('concept');
@@ -274,7 +307,7 @@
                 </button>
             );
 
-             (
+            return (
                 <div className="min-h-screen bg-slate-50 font-sans text-gray-800 pb-20">
                 <header className="bg-gradient-to-r from-indigo-900 to-purple-800 text-white pt-16 pb-24 px-6 relative overflow-hidden">
                     <div className="absolute top-0 left-0 w-full h-full opacity-10 pointer-events-none">
@@ -283,7 +316,7 @@
                     </div>
                     <div className="max-w-6xl mx-auto text-center relative z-10">
                     <div className="inline-block px-3 py-1 bg-indigo-500 bg-opacity-30 rounded-full text-xs font-tracking-wider mb-4 border border-indigo-400">
-                        運命解析システム v1.1
+                        運命解析システム v1.5
                     </div>
                     <h1 className="text-4xl md:text-6xl font-bold mb-4 tracking-tight">
                         Destiny Logic
@@ -442,8 +475,8 @@
                                     <tr><th className="px-4 py-3">フラグ名</th><th className="px-4 py-3">スコア</th><th className="px-4 py-3">解説</th></tr>
                                     </thead>
                                     <tbody className="divide-y divide-gray-100">
-                                    <tr className="bg-white/80"><td className="px-4 py-3 font-bold text-indigo-700">干合</td><td className="px-4 py-3 font-mono text-red-600 font-bold">+3.0</td><td className="px-4 py-3">魂の結合。理屈を超えた運命の人。</td></tr>
-                                    <tr className="bg-white/50"><td className="px-4 py-3 font-bold text-indigo-700">三合</td><td className="px-4 py-3 font-mono text-indigo-600 font-bold">+2.5</td><td className="px-4 py-3">3つの才能が三角形を描く最強チーム。</td></tr>
+                                    <tr className="bg-white/80"><td className="px-4 py-3 font-bold text-indigo-700">干合</td><td className="px-4 py-3 font-mono text-red-600 font-bold">+3.5</td><td className="px-4 py-3">魂の結合。理屈を超えた運命の人。</td></tr>
+                                    <tr className="bg-white/50"><td className="px-4 py-3 font-bold text-indigo-700">三合</td><td className="px-4 py-3 font-mono text-indigo-600 font-bold">+3.0</td><td className="px-4 py-3">3つの才能が三角形を描く最強チーム。</td></tr>
                                     <tr className="bg-white/80"><td className="px-4 py-3 font-bold text-indigo-700">支合</td><td className="px-4 py-3 font-mono text-indigo-600 font-bold">+2.0</td><td className="px-4 py-3">安定の接着。継続力と安心感。</td></tr>
                                     <tr className="bg-red-50"><td className="px-4 py-3 font-bold text-red-700">六冲</td><td className="px-4 py-3 font-mono text-red-600 font-bold">-3.0</td><td className="px-4 py-3 text-red-700">正面衝突。破壊・別離の作用。</td></tr>
                                     </tbody>
@@ -531,17 +564,16 @@
 
                                 <div className="space-y-4">
                                 {diagnosisResult.results.map((res, idx) => {
-                                    const rank = res.p >= 90 ? "S" : res.p >= 70 ? "A" : res.p >= 50 ? "B" : res.p >= 30 ? "C" : "D";
-                                    const rankColor = res.p >= 90 ? "text-yellow-500" : res.p >= 70 ? "text-red-500" : res.p >= 50 ? "text-green-500" : "text-gray-500";
+                                    const rankColor = res.rank === "S" ? "text-yellow-500" : res.rank === "A" ? "text-red-500" : res.rank === "B" ? "text-green-500" : res.rank === "C" ? "text-blue-500" : "text-gray-500";
                                     const barWidth = `${Math.min(res.p, 100)}%`;
-                                     (
+                                    return (
                                     <div key={idx} className="bg-white rounded-xl shadow p-6 border border-gray-100">
                                         <div className="flex justify-between items-end mb-2">
                                         <h3 className="font-bold text-lg text-gray-800">{res.label}</h3>
-                                        <div className="text-right"><span className={`text-2xl font-bold mr-2 ${rankColor}`}>{rank}</span><span className="text-sm text-gray-500">({res.p.toFixed(1)}%)</span></div>
+                                        <div className="text-right"><span className={`text-2xl font-bold mr-2 ${rankColor}`}>{res.rank}</span><span className="text-sm text-gray-500">({res.p.toFixed(1)}%)</span></div>
                                         </div>
                                         <div className="w-full bg-gray-200 rounded-full h-3 mb-4 overflow-hidden">
-                                        <div className={`h-3 rounded-full transition-all duration-1000 ${res.p >= 90 ? "bg-gradient-to-r from-yellow-400 to-yellow-600" : res.p >= 70 ? "bg-gradient-to-r from-red-400 to-pink-500" : res.p >= 50 ? "bg-gradient-to-r from-green-400 to-teal-500" : "bg-gray-400"}`} style={{ width: barWidth }}></div>
+                                        <div className={`h-3 rounded-full transition-all duration-1000 ${res.rank === "S" ? "bg-gradient-to-r from-yellow-400 to-yellow-600" : res.rank === "A" ? "bg-gradient-to-r from-red-400 to-pink-500" : res.rank === "B" ? "bg-gradient-to-r from-green-400 to-teal-500" : res.rank === "C" ? "bg-blue-300" : "bg-gray-400"}`} style={{ width: barWidth }}></div>
                                         </div>
                                         <div className="grid md:grid-cols-2 gap-4 text-sm">
                                         <div className="bg-slate-50 p-3 rounded"><span className="block text-xs text-gray-500">意味</span><span className="font-medium text-slate-700">{res.meaning}</span></div>
