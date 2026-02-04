@@ -1,0 +1,777 @@
+import React, { useState } from 'react';
+import { 
+  Star, Heart, Briefcase, Zap, Shield, 
+  Users, Activity, Lock, Sun, Moon, 
+  Droplets, Flame, Mountain, Hammer, Sprout, 
+  Wind, Flower, Anchor, ArrowRight, Info,
+  Calculator, CheckCircle, AlertCircle
+} from 'lucide-react';
+
+// ==========================================
+// 1. 基礎データ定義 (Master Data - Ported from Python)
+// ==========================================
+const LOGIC = {
+  // 十干（魂のタイプ）
+  STEMS: ["甲", "乙", "丙", "丁", "戊", "己", "庚", "辛", "壬", "癸"],
+
+  // 一般向けタイプ名称（ネーミング）
+  STEM_NAMES: {
+    "甲": "大樹 (リーダー)", "乙": "草花 (サポーター)",
+    "丙": "太陽 (カリスマ)", "丁": "灯火 (クリエイター)",
+    "戊": "山岳 (ボス)",     "己": "大地 (マザー)",
+    "庚": "鋼鉄 (戦士)",     "辛": "宝石 (アイドル)",
+    "壬": "大海 (冒険家)",   "癸": "雨露 (ヒーラー)"
+  },
+
+  // 十二支（地上のエネルギー）
+  BRANCHES: ["子", "丑", "寅", "卯", "辰", "巳", "午", "未", "申", "酉", "戌", "亥"],
+
+  // 五行（木・火・土・金・水）の定義
+  ELEMENTS: {
+    "甲": "木", "乙": "木", "丙": "火", "丁": "火", "戊": "土", "己": "土",
+    "庚": "金", "辛": "金", "壬": "水", "癸": "水"
+  },
+  
+  // 地支の五行（季節属性）
+  BRANCH_ELEMENTS: {
+    "寅": "木", "卯": "木", "巳": "火", "午": "火",
+    "辰": "土", "戌": "土", "丑": "土", "未": "土",
+    "申": "金", "酉": "金", "亥": "水", "子": "水"
+  },
+
+  // 五行の力関係（物理法則）
+  GENERATE: {"木": "火", "火": "土", "土": "金", "金": "水", "水": "木"}, // 相生
+  CONTROL:  {"木": "土", "土": "水", "水": "火", "火": "金", "金": "木"}, // 相剋
+
+  // --- 運命フラグ定義 ---
+  // JSでのセット/タプル判定用ヘルパー
+  isPairInSet: (a, b, setArray) => {
+    const pair = [a, b].sort().join(',');
+    return setArray.some(p => [...p].sort().join(',') === pair);
+  },
+  
+  // 干合（魂の結合）：+3.0点
+  KAN_GO: [["甲", "己"], ["乙", "庚"], ["丙", "辛"], ["丁", "壬"], ["戊", "癸"]],
+  
+  // 三合（最強チーム）：+2.5点
+  SAN_GO: [["申", "子", "辰"], ["寅", "午", "戌"], ["亥", "卯", "未"], ["巳", "酉", "丑"]],
+  isSanGo: (b1, b2) => {
+    // 2つが含まれるセットがあるか (Python: pair_set.issubset(triple))
+    // 注意: Pythonコードでは pair_set.issubset(triple) となっているので、
+    // 2つの要素が三合のどれかのセットに含まれていればOKという意味になる
+    const pair = [b1, b2];
+    return LOGIC.SAN_GO.some(triple => pair.every(val => triple.includes(val)));
+  },
+
+  // 六冲（正面衝突）：-3.0点
+  ROKU_CHU: [["子", "午"], ["丑", "未"], ["寅", "申"], ["卯", "酉"], ["辰", "戌"], ["巳", "亥"]],
+  
+  // 支合（安定接着）：+2.0点
+  SHI_GO: [["子", "丑"], ["寅", "亥"], ["卯", "戌"], ["辰", "酉"], ["巳", "申"], ["午", "未"]],
+
+  // 節入り日の目安
+  SETSU_IRI_DAYS: {1: 6, 2: 4, 3: 6, 4: 5, 5: 6, 6: 6, 7: 7, 8: 8, 9: 8, 10: 8, 11: 7, 12: 7}
+};
+
+// ==========================================
+// 2. 暦計算エンジン (Calculation Engine)
+// ==========================================
+const Engine = {
+  getKanshi: (d) => {
+    // d is Date object
+    // 基準日: 1900年2月20日 を 甲子(0) とする
+    const base = new Date(1900, 1, 20); // Month is 0-indexed in JS
+    
+    // 日数差分計算 (UTCで計算してタイムゾーンの影響を排除)
+    const diffTime = Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()) - Date.UTC(base.getFullYear(), base.getMonth(), base.getDate());
+    const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24));
+    
+    // Pythonの % 演算子は負の数の挙動がJSと違うが、ここでは未来の日付前提あるいは単純化
+    const day_idx = diffDays % 60; 
+    
+    // --- 節入り判定 ---
+    let year = d.getFullYear();
+    let month = d.getMonth() + 1; // 1-12
+    const day = d.getDate();
+    
+    let adjusted_month = month;
+    let adjusted_year = year;
+    
+    if (day < LOGIC.SETSU_IRI_DAYS[month]) {
+      adjusted_month -= 1;
+      if (adjusted_month === 0) {
+        adjusted_month = 12;
+        adjusted_year -= 1;
+      }
+    }
+    
+    // --- 年干支 ---
+    // 1924年=甲子(0)基準
+    // JSの % は負の数で負を返すので補正
+    let year_idx = (adjusted_year - 1924) % 60;
+    if (year_idx < 0) year_idx += 60;
+    
+    // --- 月干支 ---
+    const month_branch_idx = adjusted_month % 12;
+    
+    const year_stem_idx = year_idx % 10;
+    const tora_stem_idx = ((year_stem_idx % 5) * 2 + 2) % 10;
+    
+    let diff_from_tora;
+    if (adjusted_month >= 2) {
+      diff_from_tora = adjusted_month - 2;
+    } else {
+      diff_from_tora = 11;
+    }
+    
+    const month_stem_idx = (tora_stem_idx + diff_from_tora) % 10;
+    
+    return {
+      day: [LOGIC.STEMS[Math.abs(day_idx % 10)], LOGIC.BRANCHES[Math.abs(day_idx % 12)]],
+      month: [LOGIC.STEMS[month_stem_idx], LOGIC.BRANCHES[month_branch_idx]],
+      year: [LOGIC.STEMS[year_idx % 10], LOGIC.BRANCHES[year_idx % 12]],
+      info: `${adjusted_year}年${adjusted_month}月系`
+    };
+  },
+
+  // ==========================================
+  // 3. 相性スコア計算ロジック
+  // ==========================================
+  getStemScore: (s1, s2) => {
+    const e1 = LOGIC.ELEMENTS[s1];
+    const e2 = LOGIC.ELEMENTS[s2];
+    
+    // 1. 干合: +3.0
+    if (LOGIC.isPairInSet(s1, s2, LOGIC.KAN_GO)) return 3.0;
+    
+    let score = 0.0;
+    
+    // 2. 五行: +1.5 / -1.0
+    if (LOGIC.GENERATE[e1] === e2 || LOGIC.GENERATE[e2] === e1) score += 1.5;
+    else if (LOGIC.CONTROL[e1] === e2 || LOGIC.CONTROL[e2] === e1) score -= 1.0;
+    else if (e1 === e2) score += 1.0;
+    
+    // 3. 陰陽: +1.0 / -0.5
+    const idx1 = LOGIC.STEMS.indexOf(s1);
+    const idx2 = LOGIC.STEMS.indexOf(s2);
+    
+    // 偶数奇数が違う＝異性
+    if ((idx1 % 2) !== (idx2 % 2)) score += 1.0;
+    else score -= 0.5;
+    
+    return score;
+  },
+  
+  getBranchScore: (b1, b2) => {
+    // 1. 三合: +2.5
+    if (LOGIC.isSanGo(b1, b2)) return 2.5;
+    
+    // 2. 支合: +2.0
+    if (LOGIC.isPairInSet(b1, b2, LOGIC.SHI_GO)) return 2.0;
+    
+    // 3. 六冲: -3.0
+    if (LOGIC.isPairInSet(b1, b2, LOGIC.ROKU_CHU)) return -3.0;
+    
+    // 4. 律音: +0.5
+    if (b1 === b2) return 0.5;
+    
+    return 0.0;
+  },
+  
+  calculatePercent: (raw_score, mean=0.0, std=1.5) => {
+    const z = (raw_score - mean) / std;
+    const p = 100 / (1 + Math.exp(-z));
+    return p;
+  },
+  
+  // ==========================================
+  // 4. 診断実行メインプロセス
+  // ==========================================
+  diagnose: (date1Str, date2Str) => {
+    try {
+      const d1 = new Date(date1Str);
+      const d2 = new Date(date2Str);
+      
+      const k1 = Engine.getKanshi(d1);
+      const k2 = Engine.getKanshi(d2);
+      
+      const type1 = LOGIC.STEM_NAMES[k1.day[0]];
+      const type2 = LOGIC.STEM_NAMES[k2.day[0]];
+      
+      // --- 診断軸1: 人間関係 ---
+      const score_basic = Engine.getStemScore(k1.day[0], k2.day[0]);
+      const p_basic = Engine.calculatePercent(score_basic, 0.5, 1.2);
+      
+      // --- 診断軸2: 恋愛・結婚 ---
+      const score_branch = Engine.getBranchScore(k1.day[1], k2.day[1]);
+      const score_love = score_branch * 1.5 + score_basic * 0.5;
+      const p_love = Engine.calculatePercent(score_love, 0.5, 2.0);
+      
+      // --- 診断軸3: 仕事・ビジネス ---
+      const me_elem = LOGIC.ELEMENTS[k1.day[0]];
+      const you_env_elem = LOGIC.BRANCH_ELEMENTS[k2.month[1]];
+      
+      let score_work = 0.0;
+      let work_role = "";
+      
+      if (LOGIC.GENERATE[you_env_elem] === me_elem) {
+        score_work = 2.0; work_role = "【引き立て運】相手の環境があなたを育ててくれる";
+      } else if (me_elem === you_env_elem) {
+        score_work = 1.0; work_role = "【パートナー運】対等な立場で背中を預けられる";
+      } else if (LOGIC.CONTROL[me_elem] === you_env_elem) {
+        score_work = 1.5; work_role = "【主導権運】あなたが相手を動かし利益を生む";
+      } else if (LOGIC.CONTROL[you_env_elem] === me_elem) {
+        score_work = -1.0; work_role = "【修練運】相手のルールに管理・鍛えられる";
+      } else if (LOGIC.GENERATE[me_elem] === you_env_elem) {
+        score_work = 0.5; work_role = "【表現運】あなたの才能を相手のために発揮する";
+      } else {
+        // Fallback for no direct relation defined in logic (though logic covers all 5 relations usually)
+        // If elements are same logic covered, generate covered, control covered.
+        // The Python logic covers all 5 relations (Generate: A->B, B->A, Control: A->B, B->A, Equal).
+        // If somehow fall here, 0.0
+      }
+      
+      const p_work = Engine.calculatePercent(score_work, 0.5, 1.0);
+      
+      return {
+        me: { date: date1Str, type: type1, k: k1 },
+        you: { date: date2Str, type: type2, k: k2 },
+        results: [
+          { label: "人間関係 (Friend)", p: p_basic, meaning: "魂の共鳴度", logic: "日干同士の相性" },
+          { label: "恋愛結婚 (Love)",   p: p_love,  meaning: "生活の一致度", logic: "日支(配偶者座)の相性" },
+          { label: "仕事関係 (Work)",   p: p_work,  meaning: "環境適応力",   logic: work_role }
+        ]
+      };
+      
+    } catch (e) {
+      console.error(e);
+      return null;
+    }
+  }
+};
+
+
+const DestinyLogicDocs = () => {
+  const [activeTab, setActiveTab] = useState('concept');
+  
+  // 診断用のState
+  const [myDate, setMyDate] = useState('1990-01-01');
+  const [targetDate, setTargetDate] = useState('1990-01-01');
+  const [diagnosisResult, setDiagnosisResult] = useState(null);
+
+  const handleDiagnose = () => {
+    const result = Engine.diagnose(myDate, targetDate);
+    setDiagnosisResult(result);
+  };
+
+  // ソウル・タイプデータ
+  const soulTypes = [
+    { id: 1, code: '甲', element: '木', polar: '+', name: '大樹のリーダー', title: 'まっすぐな正義', desc: '曲がったことが嫌い。向上心が強いが、挫折すると折れやすい親分肌。', icon: <Sprout className="w-8 h-8 text-green-600" /> },
+    { id: 2, code: '乙', element: '木', polar: '-', name: '草花のサポーター', title: '柔軟な調整役', desc: '協調性があり、踏まれても立ち上がる強さを持つ。したたかなロマンチスト。', icon: <Flower className="w-8 h-8 text-green-500" /> },
+    { id: 3, code: '丙', element: '火', polar: '+', name: '太陽のスター', title: '明るいカリスマ', desc: '隠し事ができない中心人物。気分屋だが、いるだけで周囲を元気にする。', icon: <Sun className="w-8 h-8 text-red-500" /> },
+    { id: 4, code: '丁', element: '火', polar: '-', name: '灯火のクリエイター', title: '秘めた情熱', desc: '繊細で鋭い感性を持つ。普段は静かだが、内面に熱い炎を燃やしている芸術家。', icon: <Flame className="w-8 h-8 text-orange-500" /> },
+    { id: 5, code: '戊', element: '土', polar: '+', name: '山岳のボス', title: '不動の信頼感', desc: 'どっしりと構えて動じない。包容力があるが、頑固で腰が重い。', icon: <Mountain className="w-8 h-8 text-yellow-700" /> },
+    { id: 6, code: '己', element: '土', polar: '-', name: '大地のマザー', title: '多才な育成者', desc: '人を育て、受け入れる優しさがある。器用で学習能力が高い。', icon: <Users className="w-8 h-8 text-yellow-600" /> },
+    { id: 7, code: '庚', element: '金', polar: '+', name: '鋼鉄の戦士', title: '鋭い改革者', desc: '決断力と行動力がある。白黒はっきりつけたい武闘派。', icon: <Hammer className="w-8 h-8 text-gray-500" /> },
+    { id: 8, code: '辛', element: '金', polar: '-', name: '宝石のアイドル', title: '繊細な美意識', desc: 'プライドが高く傷つきやすいが、試練（研磨）を経て誰よりも輝く大器晩成型。', icon: <Star className="w-8 h-8 text-purple-400" /> },
+    { id: 9, code: '壬', element: '水', polar: '+', name: '大海の冒険家', title: '自由な開拓者', desc: '束縛を嫌い、スケールが大きい。どんな環境にも形を変えて適応する自由人。', icon: <Anchor className="w-8 h-8 text-blue-600" /> },
+    { id: 10, code: '癸', element: '水', polar: '-', name: '雨雫のヒーラー', title: '静かな知恵者', desc: '慈愛に満ち、裏方として力を発揮する。時間をかけて岩をも穿つ忍耐力を持つ。', icon: <Droplets className="w-8 h-8 text-blue-400" /> },
+  ];
+
+  // タブ切り替えコンポーネント
+  const TabButton = ({ id, label, icon }) => (
+    <button
+      onClick={() => setActiveTab(id)}
+      className={`flex items-center space-x-2 px-4 py-3 rounded-lg transition-all duration-300 ${
+        activeTab === id 
+          ? 'bg-indigo-600 text-white shadow-lg transform scale-105' 
+          : 'bg-white text-gray-600 hover:bg-gray-50'
+      }`}
+    >
+      {icon}
+      <span className="font-medium">{label}</span>
+    </button>
+  );
+
+  // コンテンツ表示エリア
+  return (
+    <div className="min-h-screen bg-slate-50 font-sans text-gray-800">
+      {/* ヘッダー */}
+      <header className="bg-gradient-to-r from-indigo-900 to-purple-800 text-white pt-16 pb-24 px-6 relative overflow-hidden">
+        <div className="absolute top-0 left-0 w-full h-full opacity-10 pointer-events-none">
+          {/* 装飾的な背景パターン */}
+          <div className="absolute top-10 left-10 w-32 h-32 rounded-full border-4 border-white"></div>
+          <div className="absolute bottom-10 right-10 w-64 h-64 rounded-full border-8 border-white"></div>
+        </div>
+        <div className="max-w-6xl mx-auto text-center relative z-10">
+          <div className="inline-block px-3 py-1 bg-indigo-500 bg-opacity-30 rounded-full text-xs font-tracking-wider mb-4 border border-indigo-400">
+            運命解析システム v1.0
+          </div>
+          <h1 className="text-5xl md:text-6xl font-bold mb-4 tracking-tight">
+            Destiny Logic
+          </h1>
+          <p className="text-xl md:text-2xl text-indigo-100 font-light">
+            4000年の統計学を、現代のアルゴリズムへ
+          </p>
+        </div>
+      </header>
+
+      {/* メインコンテンツ - マイナスマージンでヘッダーに重ねる */}
+      <main className="max-w-6xl mx-auto px-6 -mt-16 pb-20 relative z-20">
+        
+        {/* ナビゲーション */}
+        <div className="flex flex-wrap justify-center gap-2 mb-10 p-2 bg-white/80 backdrop-blur-md rounded-xl shadow-lg border border-gray-100 sticky top-4 z-50">
+          <TabButton id="concept" label="コンセプト" icon={<Zap size={18} />} />
+          <TabButton id="types" label="10のソウル・タイプ" icon={<Users size={18} />} />
+          <TabButton id="algorithm" label="アルゴリズム" icon={<Activity size={18} />} />
+          <TabButton id="axes" label="3つの診断軸" icon={<Briefcase size={18} />} />
+          <TabButton id="simulation" label="診断シミュレーション" icon={<Calculator size={18} />} />
+        </div>
+
+        {/* コンテンツエリア */}
+        <div className="bg-white rounded-2xl shadow-xl border border-gray-100 overflow-hidden min-h-[600px]">
+          
+          {/* 1. コンセプト */}
+          {activeTab === 'concept' && (
+            <div className="p-8 md:p-12 animate-fadeIn">
+              <div className="max-w-3xl mx-auto">
+                <h2 className="text-3xl font-bold text-indigo-900 mb-8 flex items-center">
+                  <span className="w-10 h-10 rounded-lg bg-indigo-100 flex items-center justify-center text-indigo-600 mr-4">1</span>
+                  システム概要
+                </h2>
+                
+                <div className="prose prose-lg text-gray-600 mb-12">
+                  <p className="text-xl leading-relaxed mb-6">
+                    本システムは、生年月日から<strong className="text-indigo-600 bg-indigo-50 px-2">「魂のコード（干支）」</strong>を読み取り、
+                    2人の人間が出会ったときに発生するエネルギー反応を予測するシミュレーションです。
+                  </p>
+                  <p className="leading-relaxed">
+                    ベースとなるのは東洋の「四柱推命」ですが、これを現代の人間関係（友人・恋愛・ビジネス）に合わせて再構築しました。
+                    単純な12パターン（星座）ではなく、60種類の干支を使用するため、<strong className="text-pink-600">3,600通り以上の精密な判定</strong>が行われます。
+                  </p>
+                </div>
+
+                <div className="grid md:grid-cols-2 gap-8">
+                  <div className="bg-slate-50 p-6 rounded-xl border border-slate-200">
+                    <h3 className="font-bold text-lg mb-3 text-slate-700">従来の占い</h3>
+                    <ul className="space-y-3">
+                      <li className="flex items-start text-sm text-gray-500">
+                        <span className="text-red-400 mr-2">✕</span> 抽象的でわかりにくい専門用語
+                      </li>
+                      <li className="flex items-start text-sm text-gray-500">
+                        <span className="text-red-400 mr-2">✕</span> 現代のライフスタイルに合わない
+                      </li>
+                      <li className="flex items-start text-sm text-gray-500">
+                        <span className="text-red-400 mr-2">✕</span> 全体的な「運勢」しか見ない
+                      </li>
+                    </ul>
+                  </div>
+                  <div className="bg-indigo-50 p-6 rounded-xl border border-indigo-200 relative overflow-hidden">
+                    <div className="absolute top-0 right-0 bg-indigo-600 text-white text-xs px-2 py-1 rounded-bl-lg">Destiny Logic</div>
+                    <h3 className="font-bold text-lg mb-3 text-indigo-800">Destiny Logic</h3>
+                    <ul className="space-y-3">
+                      <li className="flex items-start font-medium">
+                        <span className="text-green-500 mr-2">◎</span> アルゴリズムによる数値化・可視化
+                      </li>
+                      <li className="flex items-start font-medium">
+                        <span className="text-green-500 mr-2">◎</span> ビジネス・恋愛など目的別に診断
+                      </li>
+                      <li className="flex items-start font-medium">
+                        <span className="text-green-500 mr-2">◎</span> 相関関係のロジックを明確に提示
+                      </li>
+                    </ul>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* 2. ソウル・タイプ */}
+          {activeTab === 'types' && (
+            <div className="p-8 animate-fadeIn bg-slate-50/50">
+              <div className="text-center mb-10">
+                <h2 className="text-3xl font-bold text-gray-800 mb-4">10種類の「ソウル・タイプ」</h2>
+                <p className="text-gray-600 max-w-2xl mx-auto">
+                  すべての人間は、自然界の5つのエレメント（木・火・土・金・水）と、
+                  陰陽（＋－）の組み合わせである10種類のキャラクターに分類されます。
+                </p>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
+                {soulTypes.map((type) => (
+                  <div key={type.id} className="bg-white p-5 rounded-xl shadow-sm border border-gray-100 hover:shadow-md transition-shadow group">
+                    <div className="flex justify-between items-start mb-4">
+                      <span className="text-4xl font-serif text-gray-200 group-hover:text-indigo-100 transition-colors">{type.id}</span>
+                      <div className="p-2 bg-slate-50 rounded-full">{type.icon}</div>
+                    </div>
+                    <div className="mb-2">
+                      <span className={`text-xs font-bold px-2 py-1 rounded ${
+                        type.polar === '+' ? 'bg-gray-800 text-white' : 'bg-gray-200 text-gray-800'
+                      }`}>
+                        {type.code} {type.element}{type.polar}
+                      </span>
+                    </div>
+                    <h3 className="font-bold text-lg text-gray-800 mb-1">{type.name}</h3>
+                    <p className="text-indigo-600 text-sm font-medium mb-3">「{type.title}」</p>
+                    <p className="text-xs text-gray-500 leading-relaxed border-t pt-3 border-gray-100">
+                      {type.desc}
+                    </p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* 3. アルゴリズム */}
+          {activeTab === 'algorithm' && (
+            <div className="p-8 md:p-12 animate-fadeIn">
+              <div className="max-w-4xl mx-auto">
+                <h2 className="text-3xl font-bold text-indigo-900 mb-8 flex items-center">
+                  <span className="w-10 h-10 rounded-lg bg-indigo-100 flex items-center justify-center text-indigo-600 mr-4">3</span>
+                  数値設定の根拠（アルゴリズム）
+                </h2>
+
+                <div className="space-y-8">
+                  {/* 法則1 */}
+                  <div className="bg-white rounded-xl border border-gray-200 p-6 flex flex-col md:flex-row gap-6">
+                    <div className="md:w-1/3 flex items-center justify-center bg-slate-50 rounded-lg p-6">
+                      <div className="flex items-center gap-4">
+                        <div className="w-12 h-12 rounded-full bg-blue-500 text-white flex items-center justify-center text-xl font-bold">+</div>
+                        <div className="text-gray-400"><ArrowRight /></div>
+                        <div className="w-12 h-12 rounded-full bg-pink-500 text-white flex items-center justify-center text-xl font-bold">-</div>
+                      </div>
+                    </div>
+                    <div className="md:w-2/3">
+                      <h3 className="text-xl font-bold text-gray-800 mb-2">① 陰陽の法則（磁石の原理）</h3>
+                      <div className="space-y-3">
+                        <div className="flex justify-between items-center bg-pink-50 p-3 rounded-lg border border-pink-100">
+                          <div><span className="font-bold text-pink-700">異性（＋と－）</span> <span className="text-xs text-gray-500">磁石のように惹き合う</span></div>
+                          <span className="font-mono font-bold text-pink-600">+1.0点</span>
+                        </div>
+                        <div className="flex justify-between items-center bg-slate-50 p-3 rounded-lg border border-slate-100">
+                          <div><span className="font-bold text-slate-600">同性（＋と＋）</span> <span className="text-xs text-gray-500">反発、または飽きやすい</span></div>
+                          <span className="font-mono font-bold text-slate-500">-0.5点</span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* 法則2 */}
+                  <div className="bg-white rounded-xl border border-gray-200 p-6 flex flex-col md:flex-row gap-6">
+                    <div className="md:w-1/3 bg-slate-50 rounded-lg p-4 relative h-48 flex items-center justify-center">
+                       {/* 簡易的な五行図 */}
+                       <div className="relative w-40 h-40">
+                          <div className="absolute top-0 left-1/2 -translate-x-1/2 text-green-600 font-bold bg-green-100 px-2 rounded-full text-xs">木</div>
+                          <div className="absolute top-1/3 right-0 text-red-600 font-bold bg-red-100 px-2 rounded-full text-xs">火</div>
+                          <div className="absolute bottom-0 right-1/4 text-yellow-600 font-bold bg-yellow-100 px-2 rounded-full text-xs">土</div>
+                          <div className="absolute bottom-0 left-1/4 text-gray-600 font-bold bg-gray-100 px-2 rounded-full text-xs">金</div>
+                          <div className="absolute top-1/3 left-0 text-blue-600 font-bold bg-blue-100 px-2 rounded-full text-xs">水</div>
+                          {/* 矢印はCSS/SVGで表現すべきだが簡略化のため円形配置のみ */}
+                          <div className="absolute inset-0 border-2 border-dashed border-gray-300 rounded-full opacity-30"></div>
+                       </div>
+                    </div>
+                    <div className="md:w-2/3">
+                      <h3 className="text-xl font-bold text-gray-800 mb-2">② 五行の法則（エネルギー循環）</h3>
+                      <div className="grid gap-3">
+                        <div className="p-3 border-l-4 border-green-500 bg-green-50">
+                          <div className="flex justify-between">
+                            <span className="font-bold text-green-800">相生（そうしょう）</span>
+                            <span className="font-mono font-bold text-green-600">+1.5点</span>
+                          </div>
+                          <p className="text-xs text-green-700 mt-1">「木が火を生む」助ける関係。一緒にいて楽で癒やされる。</p>
+                        </div>
+                        <div className="p-3 border-l-4 border-red-500 bg-red-50">
+                          <div className="flex justify-between">
+                            <span className="font-bold text-red-800">相剋（そうこく）</span>
+                            <span className="font-mono font-bold text-red-600">-1.0点</span>
+                          </div>
+                          <p className="text-xs text-red-700 mt-1">「斧が木を切る」制御関係。刺激やストレスになるが成長には必要。</p>
+                        </div>
+                         <div className="p-3 border-l-4 border-gray-400 bg-gray-50">
+                          <div className="flex justify-between">
+                            <span className="font-bold text-gray-800">比和（ひわ）</span>
+                            <span className="font-mono font-bold text-gray-600">+1.0点</span>
+                          </div>
+                          <p className="text-xs text-gray-700 mt-1">対等な関係。友達として理解しやすい。</p>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* 法則3 */}
+                  <div className="bg-gradient-to-r from-indigo-50 to-purple-50 rounded-xl border border-indigo-100 p-6">
+                    <h3 className="text-xl font-bold text-indigo-900 mb-4 flex items-center">
+                      <Zap className="mr-2 text-yellow-500" /> ③ 運命フラグ（特殊な化学反応）
+                    </h3>
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-sm text-left">
+                        <thead className="text-xs text-gray-500 uppercase bg-white/50 border-b">
+                          <tr>
+                            <th className="px-4 py-3">フラグ名</th>
+                            <th className="px-4 py-3">スコア</th>
+                            <th className="px-4 py-3">解説</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-gray-100">
+                          <tr className="bg-white/80">
+                            <td className="px-4 py-3 font-bold text-indigo-700">干合（かんごう）</td>
+                            <td className="px-4 py-3 font-mono text-red-600 font-bold">+3.0</td>
+                            <td className="px-4 py-3 text-gray-600">魂の結合。理屈を超えた「運命の人」。最高得点。</td>
+                          </tr>
+                          <tr className="bg-white/50">
+                            <td className="px-4 py-3 font-bold text-indigo-700">三合（さんごう）</td>
+                            <td className="px-4 py-3 font-mono text-indigo-600 font-bold">+2.5</td>
+                            <td className="px-4 py-3 text-gray-600">3つの才能が三角形を描く最強チーム。発展性が高い。</td>
+                          </tr>
+                          <tr className="bg-white/80">
+                            <td className="px-4 py-3 font-bold text-indigo-700">支合（しごう）</td>
+                            <td className="px-4 py-3 font-mono text-indigo-600 font-bold">+2.0</td>
+                            <td className="px-4 py-3 text-gray-600">安定の接着。継続力と安心感がある。</td>
+                          </tr>
+                          <tr className="bg-red-50">
+                            <td className="px-4 py-3 font-bold text-red-700">六冲（ろくちゅう）</td>
+                            <td className="px-4 py-3 font-mono text-red-600 font-bold">-3.0</td>
+                            <td className="px-4 py-3 text-red-700">正面衝突。「破壊・別離」の作用がある最大減点。</td>
+                          </tr>
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* 4. 診断軸 */}
+          {activeTab === 'axes' && (
+             <div className="p-8 md:p-12 animate-fadeIn bg-slate-50/30">
+              <div className="text-center mb-10">
+                <h2 className="text-3xl font-bold text-gray-800 mb-4">診断の「3つの軸」</h2>
+                <p className="text-gray-600">
+                  人間関係は一面的ではありません。「友達としては最高だけど、恋人には向かない」<br className="hidden md:block"/>
+                  という現象を再現するため、見る場所（パラメータ）を変えて計算します。
+                </p>
+              </div>
+
+              <div className="grid md:grid-cols-3 gap-6">
+                
+                {/* 軸1 */}
+                <div className="bg-white rounded-2xl shadow-lg border-t-4 border-green-400 p-6 flex flex-col h-full">
+                  <div className="w-12 h-12 bg-green-100 rounded-full flex items-center justify-center mb-4 text-green-600">
+                    <Users size={24} />
+                  </div>
+                  <h3 className="text-xl font-bold text-gray-800 mb-1">人間関係・フィーリング</h3>
+                  <p className="text-sm text-green-600 font-medium mb-4">魂の相性</p>
+                  <div className="bg-slate-100 p-3 rounded-lg mb-4 text-xs font-mono text-center text-slate-600">
+                    あなたの日干 × 相手の日干
+                  </div>
+                  <p className="text-sm text-gray-600 leading-relaxed flex-grow">
+                    社会的立場や性別を取り払った、素っ裸の魂の相性。ここが良いと、初対面で「ウマが合う」と感じ、親友になれます。
+                  </p>
+                </div>
+
+                {/* 軸2 */}
+                <div className="bg-white rounded-2xl shadow-lg border-t-4 border-pink-400 p-6 flex flex-col h-full transform md:-translate-y-4">
+                  <div className="w-12 h-12 bg-pink-100 rounded-full flex items-center justify-center mb-4 text-pink-600">
+                    <Heart size={24} />
+                  </div>
+                  <h3 className="text-xl font-bold text-gray-800 mb-1">恋愛・結婚</h3>
+                  <p className="text-sm text-pink-600 font-medium mb-4">生活の相性</p>
+                  <div className="bg-slate-100 p-3 rounded-lg mb-4 text-xs font-mono text-center text-slate-600">
+                    あなたの日支 × 相手の日支
+                  </div>
+                  <p className="text-sm text-gray-600 leading-relaxed flex-grow">
+                    恋愛や結婚は「共同生活」であり「肉体関係」です。いくら性格が良くても、生活リズムや生理的な感覚が合わないと破綻します。
+                  </p>
+                  <div className="mt-4 pt-4 border-t border-gray-100 text-xs text-gray-500">
+                    ※「三合・支合」なら離れられない、「六冲」なら喧嘩が絶えない関係。
+                  </div>
+                </div>
+
+                {/* 軸3 */}
+                <div className="bg-white rounded-2xl shadow-lg border-t-4 border-blue-400 p-6 flex flex-col h-full">
+                  <div className="w-12 h-12 bg-blue-100 rounded-full flex items-center justify-center mb-4 text-blue-600">
+                    <Briefcase size={24} />
+                  </div>
+                  <h3 className="text-xl font-bold text-gray-800 mb-1">仕事・ビジネス</h3>
+                  <p className="text-sm text-blue-600 font-medium mb-4">環境の相性</p>
+                  <div className="bg-slate-100 p-3 rounded-lg mb-4 text-xs font-mono text-center text-slate-600">
+                    あなたの日干 × 相手の月支
+                  </div>
+                  <p className="text-sm text-gray-600 leading-relaxed mb-4">
+                    「相手が用意する環境」で、「自分」がどう機能するかを見ます。
+                  </p>
+                  <ul className="space-y-2">
+                    {[
+                      {label: '印星', text: '引き立て運（スポンサー）'},
+                      {label: '比劫', text: 'パートナー運'},
+                      {label: '食傷', text: '表現運（クリエイター）'},
+                      {label: '財星', text: '支配運（オーナー）'},
+                      {label: '官星', text: '修練運（上司・部下）'},
+                    ].map((item, idx) =>(
+                      <li key={idx} className="flex text-xs">
+                        <span className="font-bold w-10 text-gray-700">{item.label}</span>
+                        <span className="text-gray-500">{item.text}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+
+              </div>
+            </div>
+          )}
+
+          {/* 5. 診断シミュレーション (NEW) */}
+          {activeTab === 'simulation' && (
+             <div className="p-8 md:p-12 animate-fadeIn bg-gradient-to-br from-indigo-50 to-purple-50">
+               <div className="max-w-3xl mx-auto">
+                 <div className="text-center mb-10">
+                   <h2 className="text-3xl font-bold text-indigo-900 mb-2">診断シミュレーション</h2>
+                   <p className="text-gray-600">あなたと相手の生年月日を入力して、エネルギー反応を解析します。</p>
+                 </div>
+
+                 <div className="bg-white p-6 rounded-2xl shadow-lg border border-indigo-100 mb-10">
+                   <div className="flex flex-col md:flex-row gap-6 items-center justify-center">
+                     <div className="w-full">
+                       <label className="block text-sm font-bold text-gray-700 mb-2">あなたの生年月日</label>
+                       <input 
+                         type="date" 
+                         value={myDate}
+                         onChange={(e) => setMyDate(e.target.value)}
+                         className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                       />
+                     </div>
+                     <div className="text-gray-400">
+                       <Zap className="hidden md:block" />
+                       <span className="md:hidden">vs</span>
+                     </div>
+                     <div className="w-full">
+                       <label className="block text-sm font-bold text-gray-700 mb-2">相手の生年月日</label>
+                       <input 
+                         type="date" 
+                         value={targetDate}
+                         onChange={(e) => setTargetDate(e.target.value)}
+                         className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-pink-500 focus:border-pink-500"
+                       />
+                     </div>
+                   </div>
+                   
+                   <div className="mt-8 text-center">
+                     <button 
+                       onClick={handleDiagnose}
+                       className="bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3 px-8 rounded-full shadow-lg transform transition hover:scale-105 flex items-center justify-center mx-auto"
+                     >
+                       <Calculator className="mr-2" size={20} />
+                       診断を実行する
+                     </button>
+                   </div>
+                 </div>
+
+                 {/* 結果表示エリア */}
+                 {diagnosisResult && (
+                   <div className="animate-slideUp space-y-8">
+                     
+                     {/* ユーザー情報カード */}
+                     <div className="grid md:grid-cols-2 gap-4">
+                       <div className="bg-white p-5 rounded-xl border-l-4 border-indigo-500 shadow-sm">
+                         <div className="text-xs text-gray-500 mb-1">あなた ({diagnosisResult.me.date})</div>
+                         <div className="font-bold text-lg text-indigo-900 mb-2">【{diagnosisResult.me.type}】</div>
+                         <div className="text-xs font-mono text-gray-600 bg-gray-100 p-2 rounded">
+                           [魂]{diagnosisResult.me.k.day.join('')} [社会]{diagnosisResult.me.k.month.join('')} [背景]{diagnosisResult.me.k.year.join('')}
+                         </div>
+                       </div>
+                       <div className="bg-white p-5 rounded-xl border-l-4 border-pink-500 shadow-sm">
+                         <div className="text-xs text-gray-500 mb-1">相手 ({diagnosisResult.you.date})</div>
+                         <div className="font-bold text-lg text-pink-900 mb-2">【{diagnosisResult.you.type}】</div>
+                         <div className="text-xs font-mono text-gray-600 bg-gray-100 p-2 rounded">
+                           [魂]{diagnosisResult.you.k.day.join('')} [社会]{diagnosisResult.you.k.month.join('')} [背景]{diagnosisResult.you.k.year.join('')}
+                         </div>
+                       </div>
+                     </div>
+
+                     {/* スコア詳細 */}
+                     <div className="space-y-4">
+                        {diagnosisResult.results.map((res, idx) => {
+                          const rank = res.p >= 90 ? "S" : res.p >= 70 ? "A" : res.p >= 50 ? "B" : res.p >= 30 ? "C" : "D";
+                          const rankColor = res.p >= 90 ? "text-yellow-500" : res.p >= 70 ? "text-red-500" : res.p >= 50 ? "text-green-500" : "text-gray-500";
+                          const barWidth = `${Math.min(res.p, 100)}%`;
+                          
+                          return (
+                            <div key={idx} className="bg-white rounded-xl shadow p-6 border border-gray-100">
+                              <div className="flex justify-between items-end mb-2">
+                                <h3 className="font-bold text-lg text-gray-800">{res.label}</h3>
+                                <div className="text-right">
+                                  <span className={`text-2xl font-bold mr-2 ${rankColor}`}>{rank}</span>
+                                  <span className="text-sm text-gray-500">({res.p.toFixed(1)}%)</span>
+                                </div>
+                              </div>
+                              
+                              {/* Gauge */}
+                              <div className="w-full bg-gray-200 rounded-full h-3 mb-4 overflow-hidden">
+                                <div 
+                                  className={`h-3 rounded-full transition-all duration-1000 ${
+                                    res.p >= 90 ? "bg-gradient-to-r from-yellow-400 to-yellow-600" :
+                                    res.p >= 70 ? "bg-gradient-to-r from-red-400 to-pink-500" :
+                                    res.p >= 50 ? "bg-gradient-to-r from-green-400 to-teal-500" :
+                                    "bg-gray-400"
+                                  }`}
+                                  style={{ width: barWidth }}
+                                ></div>
+                              </div>
+
+                              <div className="grid md:grid-cols-2 gap-4 text-sm">
+                                <div className="bg-slate-50 p-3 rounded">
+                                  <span className="block text-xs text-gray-500">意味</span>
+                                  <span className="font-medium text-slate-700">{res.meaning}</span>
+                                </div>
+                                <div className="bg-indigo-50 p-3 rounded">
+                                  <span className="block text-xs text-indigo-400">判定ロジック</span>
+                                  <span className="font-medium text-indigo-800">{res.logic}</span>
+                                </div>
+                              </div>
+                            </div>
+                          );
+                        })}
+                     </div>
+
+                   </div>
+                 )}
+
+               </div>
+             </div>
+          )}
+
+        </div>
+      </main>
+
+      {/* フッター */}
+      <footer className="bg-gray-800 text-gray-300 py-12 px-6">
+        <div className="max-w-6xl mx-auto text-center">
+          <h2 className="text-2xl font-bold text-white mb-2">Destiny Logic</h2>
+          <p className="text-sm text-gray-500 mb-8">Fate Analysis System</p>
+          <div className="grid md:grid-cols-3 gap-8 text-left text-sm border-t border-gray-700 pt-8">
+            <div>
+              <h4 className="font-bold text-white mb-2">About</h4>
+              <p>四柱推命の膨大なデータを現代風に再解釈し、アルゴリズム化した運命解析システムです。</p>
+            </div>
+            <div>
+              <h4 className="font-bold text-white mb-2">Notice</h4>
+              <p>本システムは統計学的なアプローチを採用していますが、結果を保証するものではありません。</p>
+            </div>
+            <div>
+              <h4 className="font-bold text-white mb-2">Version</h4>
+              <p>System Ver: 1.1.0</p>
+              <p>Engine: Python Ported Logic</p>
+            </div>
+          </div>
+          <div className="mt-12 text-xs text-gray-600">
+            © 2024 Destiny Logic System. All rights reserved.
+          </div>
+        </div>
+      </footer>
+    </div>
+  );
+};
+
+export default DestinyLogicDocs;
