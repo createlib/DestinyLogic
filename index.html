@@ -2,9 +2,20 @@
 <html lang="ja">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Destiny Logic - 運命解析システム</title>
     
+    <!-- PWA Settings -->
+    <link rel="manifest" href="manifest.json">
+    <meta name="theme-color" content="#4f46e5">
+    <meta name="description" content="4000年の統計学を現代のアルゴリズムへ。運命解析システム Destiny Logic">
+    
+    <!-- iOS Support -->
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="DestinyLogic">
+    <link rel="apple-touch-icon" href="icon-192.png">
+
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
     
@@ -19,15 +30,18 @@
     <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@300;400;500;700&display=swap" rel="stylesheet">
 
     <style>
-        body { font-family: 'Noto Sans JP', sans-serif; }
+        body { font-family: 'Noto Sans JP', sans-serif; overscroll-behavior-y: none; }
         .animate-fadeIn { animation: fadeIn 0.5s ease-in-out; }
         .animate-slideUp { animation: slideUp 0.5s ease-out; }
         
         @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
         @keyframes slideUp { from { transform: translateY(20px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+        
+        /* PWA Install Prompt Button (Hidden by default) */
+        #pwa-install-btn { display: none; }
     </style>
 </head>
-<body class="bg-slate-50 text-gray-800">
+<body class="bg-slate-50 text-gray-800 select-none">
     <div id="root"></div>
 
     <script type="text/babel">
@@ -59,6 +73,7 @@
         const Anchor = (props) => <IconBase {...props}><circle cx="12" cy="5" r="3"></circle><line x1="12" y1="22" x2="12" y2="8"></line><path d="M5 12H2a10 10 0 0 0 20 0h-3"></path></IconBase>;
         const ArrowRight = (props) => <IconBase {...props}><line x1="5" y1="12" x2="19" y2="12"></line><polyline points="12 5 19 12 12 19"></polyline></IconBase>;
         const Calculator = (props) => <IconBase {...props}><rect x="4" y="2" width="16" height="20" rx="2"></rect><line x1="8" y1="6" x2="16" y2="6"></line><line x1="16" y1="14" x2="16" y2="14"></line><line x1="16" y1="18" x2="16" y2="18"></line><line x1="8" y1="10" x2="8" y2="10"></line><line x1="8" y1="14" x2="8" y2="14"></line><line x1="8" y1="18" x2="8" y2="18"></line><line x1="12" y1="10" x2="12" y2="10"></line><line x1="12" y1="14" x2="12" y2="14"></line><line x1="12" y1="18" x2="12" y2="18"></line></IconBase>;
+        const Download = (props) => <IconBase {...props}><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></IconBase>;
 
         // ==========================================
         // 1. 基礎データ定義 (Master Data)
@@ -270,10 +285,30 @@
         // ==========================================
         const DestinyLogicDocs = () => {
             const [activeTab, setActiveTab] = useState('concept');
+            const [deferredPrompt, setDeferredPrompt] = useState(null);
             
             const [myDate, setMyDate] = useState('1990-01-01');
             const [targetDate, setTargetDate] = useState('1990-01-01');
             const [diagnosisResult, setDiagnosisResult] = useState(null);
+
+            useEffect(() => {
+                window.addEventListener('beforeinstallprompt', (e) => {
+                    e.preventDefault();
+                    setDeferredPrompt(e);
+                });
+            }, []);
+
+            const handleInstall = () => {
+                if (deferredPrompt) {
+                    deferredPrompt.prompt();
+                    deferredPrompt.userChoice.then((choiceResult) => {
+                        if (choiceResult.outcome === 'accepted') {
+                            console.log('User accepted the install prompt');
+                        }
+                        setDeferredPrompt(null);
+                    });
+                }
+            };
 
             const handleDiagnose = () => {
                 const result = Engine.diagnose(myDate, targetDate);
@@ -324,6 +359,15 @@
                     <p className="text-xl md:text-2xl text-indigo-100 font-light">
                         4000年の統計学を、現代のアルゴリズムへ
                     </p>
+                    {deferredPrompt && (
+                        <button 
+                            onClick={handleInstall}
+                            className="mt-6 mx-auto flex items-center px-4 py-2 bg-white/20 hover:bg-white/30 backdrop-blur rounded-full text-sm transition-all border border-white/40"
+                        >
+                            <Download size={16} className="mr-2" />
+                            アプリとしてインストール
+                        </button>
+                    )}
                     </div>
                 </header>
 
@@ -619,3 +663,14 @@
         const root = ReactDOM.createRoot(document.getElementById('root'));
         root.render(<DestinyLogicDocs />);
     </script>
+    <script>
+      if ('serviceWorker' in navigator) {
+        window.addEventListener('load', () => {
+          navigator.serviceWorker.register('./sw.js')
+            .then(reg => console.log('SW registered!', reg))
+            .catch(err => console.log('SW registration failed: ', err));
+        });
+      }
+    </script>
+</body>
+</html>
